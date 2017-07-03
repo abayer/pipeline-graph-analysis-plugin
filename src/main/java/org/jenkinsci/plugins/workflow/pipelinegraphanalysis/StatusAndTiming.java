@@ -33,6 +33,7 @@ import hudson.model.Result;
 import org.apache.commons.lang.StringUtils;
 import org.jenkinsci.plugins.workflow.actions.ErrorAction;
 import org.jenkinsci.plugins.workflow.actions.NotExecutedNodeAction;
+import org.jenkinsci.plugins.workflow.actions.StepStatusAction;
 import org.jenkinsci.plugins.workflow.actions.ThreadNameAction;
 import org.jenkinsci.plugins.workflow.actions.TimingAction;
 import org.jenkinsci.plugins.workflow.flow.FlowExecution;
@@ -45,6 +46,7 @@ import org.jenkinsci.plugins.workflow.graphanalysis.DepthFirstScanner;
 import org.jenkinsci.plugins.workflow.graphanalysis.MemoryFlowChunk;
 import org.jenkinsci.plugins.workflow.graphanalysis.ParallelMemoryFlowChunk;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
+import org.jenkinsci.plugins.workflow.steps.FlowInterruptedException;
 import org.jenkinsci.plugins.workflow.support.actions.PauseAction;
 import org.jenkinsci.plugins.workflow.support.steps.input.InputAction;
 import org.jenkinsci.plugins.workflow.support.steps.input.InputStepExecution;
@@ -169,7 +171,19 @@ public class StatusAndTiming {
                 if (exec.getCurrentHeads().size() > 1 && lastNode instanceof BlockEndNode) {  // Check to see if all the action is on other branches
                     BlockStartNode start = ((BlockEndNode)lastNode).getStartNode();
                     if (start.getAction(ThreadNameAction.class) != null) {
-                        return (lastNode.getError() == null) ? GenericStatus.SUCCESS : GenericStatus.FAILURE;
+                        if (lastNode.getError() != null) {
+                            ErrorAction errorAction = lastNode.getError();
+                            if (errorAction.getError() instanceof FlowInterruptedException) {
+                                return GenericStatus.ABORTED;
+                            } else {
+                                return GenericStatus.FAILURE;
+                            }
+                        } else if (lastNode.getStepStatus() != null) {
+                            StepStatusAction stepStatusAction = lastNode.getStepStatus();
+                            return GenericStatus.fromResult(stepStatusAction.getResult());
+                        } else {
+                            return GenericStatus.SUCCESS;
+                        }
                     }
                 }
                 PauseAction pauseAction = lastNode.getAction(PauseAction.class);
@@ -178,28 +192,28 @@ public class StatusAndTiming {
                         ? GenericStatus.PAUSED_PENDING_INPUT : GenericStatus.IN_PROGRESS;
             } else {
                 // Final chunk on completed build
-                Result r = run.getResult();
-                if (r == Result.NOT_BUILT) {
-                    return GenericStatus.NOT_EXECUTED;
-                } else if (r == Result.ABORTED) {
-                    return GenericStatus.ABORTED;
-                } else if (r == Result.FAILURE ) {
-                    return GenericStatus.FAILURE;
-                } else if (r == Result.UNSTABLE ) {
-                    return GenericStatus.UNSTABLE;
-                } else {
-                    return GenericStatus.SUCCESS;
-                }
+                return GenericStatus.fromResult(run.getResult());
             }
         }
         ErrorAction err = lastNode.getError();
         if (err != null) {
             // If next node lacks and ErrorAction, the error was caught in a catch block
-            return (after.getError() == null) ? GenericStatus.SUCCESS : GenericStatus.FAILURE;
+            if (after.getError() != null) {
+                if (err.getError() instanceof FlowInterruptedException) {
+                    return GenericStatus.ABORTED;
+                } else {
+                    return GenericStatus.FAILURE;
+                }
+            }
         }
 
         // Previous chunk before end. If flow continued beyond this, it didn't fail.
-        return (run.getResult() == Result.UNSTABLE) ? GenericStatus.UNSTABLE : GenericStatus.SUCCESS;
+        if (lastNode.getStepStatus() != null) {
+            StepStatusAction stepStatusAction = lastNode.getStepStatus();
+            return GenericStatus.fromResult(stepStatusAction.getResult());
+        } else {
+            return GenericStatus.SUCCESS;
+        }
     }
 
     @CheckForNull

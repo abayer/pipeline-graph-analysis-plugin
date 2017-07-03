@@ -63,5 +63,19 @@ public enum GenericStatus {
     /**
      * Not complete: we are waiting for user input to continue (special case of IN_PROGRESS)
      */
-    PAUSED_PENDING_INPUT
+    PAUSED_PENDING_INPUT;
+
+    public static GenericStatus fromResult(Result r) {
+        if (r == Result.NOT_BUILT) {
+            return GenericStatus.NOT_EXECUTED;
+        } else if (r == Result.ABORTED) {
+            return GenericStatus.ABORTED;
+        } else if (r == Result.FAILURE) {
+            return GenericStatus.FAILURE;
+        } else if (r == Result.UNSTABLE) {
+            return GenericStatus.UNSTABLE;
+        } else {
+            return GenericStatus.SUCCESS;
+        }
+    }
 }
